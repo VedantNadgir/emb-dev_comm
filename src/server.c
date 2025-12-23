@@ -10,46 +10,49 @@
 #define MAX_PKT 64
 
 static void handle_client(int fd) {
-    uint8_t req[MAX_PKT];
+    uint8_t buf[MAX_PKT];
+    size_t buf_len = 0;
+
     uint8_t resp[MAX_PKT];
     int resp_len;
 
-    ssize_t n;
     while (1) {
-        n = recv(fd, req, sizeof(req), 0);
-        if (n <= 0) {
-            // Client closed connection or error
+        ssize_t n = recv(fd, buf + buf_len, sizeof(buf) - buf_len, 0);
+        if (n <= 0)
             break;
-        }
 
-        int offset = 0;
-        while (offset < n) {
-            uint8_t cmd = req[offset];
+        buf_len += n;
 
+        size_t offset = 0;
+        while (1) {
+            if (buf_len - offset < 1)
+                break;
+
+            uint8_t cmd = buf[offset];
             int pkt_size = 0;
             if (cmd == cmd_READ) pkt_size = REQ_READ_SIZE;
             else if (cmd == cmd_WRITE) pkt_size = REQ_WRITE_SIZE;
             else {
-                // Unknown command → skip byte
+                // Unknown byte → resync
                 offset++;
                 continue;
             }
 
-            // Ensure we have full packet
-            if (offset + pkt_size > n) {
-                // Malformed / truncated packet → protocol error
-                uint8_t err_resp[2];
-                err_resp[0] = DEV_ERR_VAL;  // or a dedicated PROTO_ERR_TRUNCATED
-                err_resp[1] = 0xFF;
-                send(fd, err_resp, 2, 0);
-                return;  // Close client connection
-            }
+            if ((int)(buf_len - offset) < pkt_size)
+                break;  // Wait for more data
 
-            // Process one packet
-            if (protocol_handle_req(&req[offset], pkt_size, resp, &resp_len) == 0) {
+            if (protocol_handle_req(&buf[offset], pkt_size,
+                                     resp, &resp_len) == 0) {
                 send(fd, resp, resp_len, 0);
             }
-            offset += pkt_size; // Move to next packet in buffer
+
+            offset += pkt_size;
+        }
+
+        // Move remaining bytes to front
+        if (offset > 0) {
+            memmove(buf, buf + offset, buf_len - offset);
+            buf_len -= offset;
         }
     }
 }

@@ -15,7 +15,7 @@ int device_read(uint8_t reg, int32_t *out){
     }
     switch (reg) {
         case(REG_STATUS):
-            *out = (dev.control ==0);
+            *out = (dev.control ==0)? 1 : 0;
             return DEV_OK;
         case REG_RW0:
         case REG_RW1:
